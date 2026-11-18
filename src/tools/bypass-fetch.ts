@@ -20,11 +20,11 @@ import { artifactBytes, artifactPath, finalResponseHeaders, parseRedirectHeaders
  * shell string — so URLs, headers, and bodies cannot break out of their argv
  * slot, and every header stays a distinct `-H name: value` element.
  *
- * Scope contract (operator decision): the engagement state records scope as
- * metadata ONLY. A request whose host is outside the recorded scope is never
- * blocked; the call may set `outOfScope: true` (or the runner marks it) and
- * that acknowledgement is recorded in the evidence store. Scope cannot gate
- * the harness — the operator decides and stays in the loop.
+ * Scope contract: when the engagement state records a scope, a request whose
+ * host falls outside it is REFUSED unless the call passes `outOfScope: true` as
+ * an explicit per-call override, which is recorded in the evidence store. An
+ * empty scope (none recorded yet) is not enforced, so early recon is unaffected.
+ * The operator stays in the loop: the override exists, but silence is a refusal.
  *
  * Secret discipline: cookies live in a per-session curl cookie jar (mode 0600)
  * and never in the tool result; the evidence trail stores status/timing/
@@ -99,7 +99,7 @@ export function requestHost(url: string): string | null {
 }
 
 /** Only the hostname of each scope entry is used for matching (suffix match). */
-function hostInScope(host: string, scope: string[]): boolean {
+export function hostInScope(host: string, scope: string[]): boolean {
   return scope.some((entry) => {
     const trimmed = entry.trim().toLowerCase().replace(/^\w+:\/\//, "").replace(/\/.*$/, "");
     if (!trimmed) return false;
@@ -227,7 +227,7 @@ const bypassFetchTool: ToolDefinition<typeof parameters> = {
     "Raw HTTP requests with a real browser TLS/HTTP-2 fingerprint via curl-impersonate (JA3/JA4 + Akamai h2 impersonation), for bot-protected APIs in authorized engagements. " +
     "Not a header-spoof: the TLS ClientHello and HTTP/2 SETTINGS match Chrome/Safari/Firefox profiles. Falls back to stock curl (with a warning) when impersonation is not installed.",
   promptSnippet:
-    "Use bypass_fetch (not raw curl/python) for sign-up/login/API calls against bot-protected targets; it presents Chrome-grade TLS+HTTP/2 fingerprints and keeps cookies per session.",
+    "Use bypass_fetch (not raw curl/python) for sign-up/login/API calls against bot-protected targets; it presents Chrome-grade TLS+HTTP/2 fingerprints and keeps cookies per session. Hosts outside the recorded cyber_state scope are refused unless the call passes outOfScope:true (logged as evidence).",
   parameters,
   executionMode: "sequential",
   annotations: { readOnlyHint: false, openWorldHint: true, idempotentHint: false },
@@ -244,17 +244,26 @@ const bypassFetchTool: ToolDefinition<typeof parameters> = {
     const host = requestHost(url)!;
     const parsedUrl = new URL(url);
 
-    // Scope tracking: record whether the host is outside the engagement scope
-    // for evidence metadata, but never block requests — the operator decides scope.
+    // Scope enforcement: when the engagement state records a scope and the host
+    // falls outside it, the request is blocked unless the caller passes an explicit
+    // outOfScope:true override (recorded in the evidence trail). An empty scope —
+    // none recorded yet — matches nothing and is not enforced, so early recon before
+    // scope is set is unaffected.
     let scope: string[] = [];
     try {
       scope = recoverState(ctx.sessionManager.getBranch()).scope ?? [];
     } catch { /* no scope recorded */ }
 
-    let outOfScope = false;
-    if (scope.length > 0 && !hostInScope(host, scope)) {
-      outOfScope = true;
+    const hostOutsideScope = scope.length > 0 && !hostInScope(host, scope);
+    if (hostOutsideScope && params.outOfScope !== true) {
+      throw new Error(
+        `host ${host} is outside the recorded engagement scope (${scope.join(", ")}). ` +
+        `Request refused. Record the host in cyber_state scope if it is authorized, ` +
+        `or pass outOfScope:true to override for this one call (the override is logged as evidence).`,
+      );
     }
+    // Reaching here with hostOutsideScope means the caller acknowledged it.
+    const outOfScope = hostOutsideScope;
 
     const engine = resolveFetchEngine();
     if (!engine) throw new Error("no curl available — install curl-impersonate (tools/install-curl-impersonate.sh) or curl");

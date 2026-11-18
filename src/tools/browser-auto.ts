@@ -11,6 +11,8 @@ import { storeArtifact, type ArtifactRef } from "../artifacts/store.ts";
 // cloak.ts is the shared engine plumbing: the cloak root resolver and the
 // named persistent-profile dirs for the one-and-only engine.
 import { browserProfileDir, resolveCloakDir, resolveNodeBin } from "./cloak.ts";
+import { recoverState } from "../state.ts";
+import { requestHost, hostInScope } from "./bypass-fetch.ts";
 
 /**
  * `browser` — the ONE browser tool after the Oct 2026 merge (the old
@@ -157,9 +159,45 @@ const parameters = Type.Object({
   dialogPrompt: Type.Optional(Type.String({maxLength: 500, description: "Prompt response used when dialogAction is accept."})),
   captureId: Type.Optional(Type.String({pattern: "^n[a-f0-9]{32}$", maxLength: 33, description: "Opaque captureId from action network; bound to its originating page recorder."})),
   maxBytes: Type.Optional(Type.Number({minimum: 1, maximum: 524288, description: "Maximum captured network response size (default 524288 bytes)."})),
+  outOfScope: Type.Optional(Type.Boolean({ description: "Explicit acknowledgement that the target URL's host is outside the recorded engagement scope; required to navigate there, and recorded in evidence." })),
 }, { additionalProperties: false });
 
 type BrowserParams = Static<typeof parameters>;
+
+/**
+ * The URL this call would navigate to, for scope enforcement, or null when the
+ * action touches only the current page (act/eval/snapshot/tabs/history/close) or
+ * uses the default fingerprint target rather than a real engagement host.
+ */
+function scopeTargetUrl(params: BrowserParams): string | null {
+  const action = String(params.action);
+  if (action === "fingerprint") return params.url?.trim() ? params.url.trim() : null;
+  if ((action === "navigate" || action === "newTab" || action === "turnstile" || action === "clearance") && params.url) {
+    return params.url.trim();
+  }
+  return null;
+}
+
+/**
+ * Refuse to point the browser at a host outside the recorded engagement scope
+ * unless the caller passes outOfScope:true. Mirrors the bypass_fetch contract so
+ * both request lanes enforce the same boundary. No scope recorded ⇒ not enforced.
+ */
+export function enforceBrowserScope(params: BrowserParams, ctx: ExtensionToolContext | undefined): void {
+  const target = scopeTargetUrl(params);
+  if (!target) return;
+  const host = requestHost(target);
+  if (!host) return;
+  let scope: string[] = [];
+  try { scope = recoverState(ctx!.sessionManager.getBranch()).scope ?? []; } catch { return; }
+  if (scope.length > 0 && !hostInScope(host, scope) && params.outOfScope !== true) {
+    throw new Error(
+      `host ${host} is outside the recorded engagement scope (${scope.join(", ")}). ` +
+      `Browser navigation refused. Record the host in cyber_state scope if it is authorized, ` +
+      `or pass outOfScope:true to override for this one call (the override is logged as evidence).`,
+    );
+  }
+}
 
 /** Typed self-validation (the harness validates the schema too; both name fields). */
 export function validateParams(params: BrowserParams): void {
@@ -678,8 +716,8 @@ export async function runBrowser(params: BrowserParams, signal: AbortSignal | un
     openEvidence().addEvidence({
       kind: "browser",
       refs: [action, params.url ?? ""],
-      text: `${summary}${result.ok === true ? "" : ` error=${String(result.error ?? "").slice(0, 200)}`}`,
-      sensitivity: "internal",
+      text: `${summary}${params.outOfScope === true ? " outOfScope=acknowledged" : ""}${result.ok === true ? "" : ` error=${String(result.error ?? "").slice(0, 200)}`}`,
+      sensitivity: params.outOfScope === true ? "restricted" : "internal",
     });
   } catch { /* evidence is an audit trail, never the point of failure */ }
 
@@ -726,7 +764,7 @@ const browserTool: ToolDefinition<typeof parameters> = {
     "Harvest actions (run HEAD-OFFSCREEN — a real invisible window; headless never starts a Cloudflare challenge): turnstile resolves a Turnstile token end-to-end (single-use, ~300s — present via bypass_fetch same-host immediately), clearance runs a full managed-challenge interstitial and returns the origin cookie jar + engine UA for a coherent bypass_fetch handoff, fingerprint reports the engine's own UA/JA3/JA4/HTTP-2 as any target sees it. " +
     "Headless and invisible by default; showUi:true opens a real visible browser window the work continues in. includeScreenshot(+fullPage) returns a PNG path you can open with read. Use per-target profiles. Authorized engagements only.",
   promptSnippet:
-    "Use tabs and stable tabId to track pages; tabUrl selects an exact unique URL. Use frames then frame:N for iframes. domSnapshot provides bounded element refs; refresh after navigation. act runs auto-waiting steps on the current page; check/uncheck/select/hover/waitURL/waitLoad are available. network + networkFilter inspects request metadata; networkArtifact explicitly saves one bounded response body. downloads lists download refs and downloadIndex exports one as a shared artifact. Dialogs default to dismiss and can be explicitly accepted/dismissed on the triggering call. Turnstile follows replacement tabs by events, with a 10-second token fallback. Use browser for ALL browser work on the CloakBrowser engine (named persistent profiles keep cookies/localStorage across calls and close): navigate/eval/snapshot/close for interactive sessions; browser turnstile <url> harvests a Turnstile token head-offscreen (single-use ~300s — present via bypass_fetch same-host IMMEDIATELY); browser clearance <url> runs a full Cloudflare challenge and hands back cf_clearance + UA — replay via bypass_fetch with the matching User-Agent header and same egress right away (the jar also persists in the profile); browser fingerprint reports the engine's UA/JA3/JA4/HTTP-2. showUi opens a visible window; includeScreenshot(+fullPage) returns a PNG path to open with read.",
+    "Use tabs and stable tabId to track pages; tabUrl selects an exact unique URL. Use frames then frame:N for iframes. domSnapshot provides bounded element refs; refresh after navigation. act runs auto-waiting steps on the current page; check/uncheck/select/hover/waitURL/waitLoad are available. network + networkFilter inspects request metadata; networkArtifact explicitly saves one bounded response body. downloads lists download refs and downloadIndex exports one as a shared artifact. Dialogs default to dismiss and can be explicitly accepted/dismissed on the triggering call. Turnstile follows replacement tabs by events, with a 10-second token fallback. Use browser for ALL browser work on the CloakBrowser engine (named persistent profiles keep cookies/localStorage across calls and close): navigate/eval/snapshot/close for interactive sessions; browser turnstile <url> harvests a Turnstile token head-offscreen (single-use ~300s — present via bypass_fetch same-host IMMEDIATELY); browser clearance <url> runs a full Cloudflare challenge and hands back cf_clearance + UA — replay via bypass_fetch with the matching User-Agent header and same egress right away (the jar also persists in the profile); browser fingerprint reports the engine's UA/JA3/JA4/HTTP-2. showUi opens a visible window; includeScreenshot(+fullPage) returns a PNG path to open with read. Navigation to a host outside the recorded cyber_state scope (navigate/newTab/turnstile/clearance) is refused unless the call passes outOfScope:true (logged as evidence).",
   parameters,
   executionMode: "sequential",
   annotations: { readOnlyHint: false, openWorldHint: true, idempotentHint: false },
@@ -735,9 +773,10 @@ const browserTool: ToolDefinition<typeof parameters> = {
     params: BrowserParams,
     signal: AbortSignal | undefined,
     _onUpdate,
-    _ctx: ExtensionToolContext
+    ctx: ExtensionToolContext
   ): Promise<AgentToolResult> {
     validateParams(params);
+    enforceBrowserScope(params, ctx);
     const { text, meta, isError, diag, cookies, network, dom, artifacts } = await runBrowser(params, signal);
 
     // close with shutdown:true: the profile dir IS the engine state and it

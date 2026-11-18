@@ -5,9 +5,11 @@ import { join } from "node:path";
 import type { ExtensionAPI, ExtensionToolContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
   compactDiag,
+  enforceBrowserScope,
   registerBrowserAutoTool,
   validateParams,
 } from "../src/tools/browser-auto.ts";
+import { emptyState, updateState, STATE_ENTRY } from "../src/state.ts";
 
 /**
  * Modelless fakes ONLY — no live browser in unit tests. The node binary is a
@@ -629,5 +631,38 @@ describe("browser expanded controls", () => {
     expect(driverSpec()).toMatchObject({action: "act", tabId: "t2", frame: 1,
       steps: [{op: "hover", sel: "#menu"}], stopOnError: true,
       includeNetwork: true, networkFilter: "/api/"});
+  });
+});
+
+describe("browser scope enforcement", () => {
+  const scopedCtx = (scope: string[]) => ({
+    sessionManager: { getBranch: () => [{ type: "custom", customType: STATE_ENTRY, data: updateState(emptyState(), { scope }) }] },
+    tools: [],
+  }) as unknown as ExtensionToolContext;
+
+  test("refuses navigation to a host outside the recorded scope", () => {
+    const ctxScoped = scopedCtx(["target.test"]);
+    expect(() => enforceBrowserScope({ action: "navigate", url: "https://evil.example/" } as any, ctxScoped))
+      .toThrow(/outside the recorded engagement scope/);
+    expect(() => enforceBrowserScope({ action: "turnstile", url: "https://evil.example/" } as any, ctxScoped))
+      .toThrow(/outside the recorded engagement scope/);
+  });
+
+  test("allows an out-of-scope host only when outOfScope is acknowledged", () => {
+    const ctxScoped = scopedCtx(["target.test"]);
+    expect(() => enforceBrowserScope({ action: "navigate", url: "https://evil.example/", outOfScope: true } as any, ctxScoped))
+      .not.toThrow();
+  });
+
+  test("allows in-scope hosts (suffix match) and current-page actions with no URL", () => {
+    const ctxScoped = scopedCtx(["target.test"]);
+    expect(() => enforceBrowserScope({ action: "navigate", url: "https://app.target.test/login" } as any, ctxScoped)).not.toThrow();
+    expect(() => enforceBrowserScope({ action: "eval", code: "return 1" } as any, ctxScoped)).not.toThrow();
+    expect(() => enforceBrowserScope({ action: "fingerprint" } as any, ctxScoped)).not.toThrow();
+  });
+
+  test("does not enforce when no scope is recorded", () => {
+    const ctxEmpty = scopedCtx([]);
+    expect(() => enforceBrowserScope({ action: "navigate", url: "https://anything.example/" } as any, ctxEmpty)).not.toThrow();
   });
 });

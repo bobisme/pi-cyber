@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionToolContext } from "@earendil-works/pi-coding-agent";
 import { registerBypassFetchTool, resolveFetchEngine, buildCurlArgs, requestHost } from "../src/tools/bypass-fetch.ts";
+import { emptyState, updateState, STATE_ENTRY } from "../src/state.ts";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { readArtifact, resolveArtifactPath, storeArtifact } from "../src/artifacts/store.ts";
 import { finalResponseHeaders, parseRedirectHeaders, redactResponseHeaders } from "../src/tools/http-artifacts.ts";
@@ -53,6 +54,12 @@ function freshWork(): void {
 
 /** scope recorded on the (stub) cyber_state branch: fixture session entries are minimal, so we exercise through hostInScope via the execute path with an injected session. */
 const ctx = { sessionManager: { getBranch: () => [] }, tools: [] } as unknown as ExtensionToolContext;
+
+/** A ctx whose branch records an engagement scope, so execute's scope gate is live. */
+const scopedCtx = (scope: string[]) => ({
+  sessionManager: { getBranch: () => [{ type: "custom", customType: STATE_ENTRY, data: updateState(emptyState(), { scope }) }] },
+  tools: [],
+}) as unknown as ExtensionToolContext;
 
 const SAMPLE_TAIL = "\t200\t0.512\t4449\tapplication/json\thttps://target.test/api/me\n";
 
@@ -201,6 +208,23 @@ describe("bypass_fetch execute", () => {
     fakeEngine("plain text\t200\t0.1\t10\t\thttps://target.test/text\n");
     const plain = await bypassFetch!.execute("plain", { method: "GET", url: "https://target.test/text" }, undefined, undefined, ctx);
     expect(plain.content[0].type === "text" ? plain.content[0].text : "").toContain("plain text");
+  });
+
+  test("refuses an out-of-scope host, and proceeds only once outOfScope is acknowledged", async () => {
+    freshWork();
+    process.env.CYBER_EVIDENCE_DIR = work;
+    const scoped = scopedCtx(["target.test"]);
+    // No acknowledgement: refused before the engine is ever resolved or run.
+    await expect(bypassFetch!.execute("oos", { method: "GET", url: "https://evil.example/" }, undefined, undefined, scoped))
+      .rejects.toThrow(/outside the recorded engagement scope/);
+    // Explicit override: the request runs (fake engine) and is flagged out-of-scope.
+    fakeEngine("ack\t200\t0.1\t3\ttext/plain\thttps://evil.example/\n");
+    const ack = await bypassFetch!.execute("ack", { method: "GET", url: "https://evil.example/", outOfScope: true }, undefined, undefined, scoped);
+    expect(ack.details).toMatchObject({ outOfScope: true });
+    // An in-scope host (suffix match) is never blocked and is not flagged.
+    fakeEngine("in\t200\t0.1\t2\ttext/plain\thttps://api.target.test/\n");
+    const inScope = await bypassFetch!.execute("in", { method: "GET", url: "https://api.target.test/" }, undefined, undefined, scoped);
+    expect(inScope.details).toMatchObject({ outOfScope: false });
   });
 });
 
