@@ -2,7 +2,8 @@
 # pi-cyber pinned native tool installer.
 #
 # PATH alone is not readiness. For every manifest entry with disposition "core":
-#   1. resolve the pinned release via the GitHub API (latest release tag + matching darwin/arm64 asset)
+#   1. resolve the pinned release via the GitHub API (latest release tag + asset for this host's
+#      process.platform/process.arch, as decided by src/tools/installer.ts)
 #   2. download the artifact to a temp dir
 #   3. verify SHA-256 against the manifest pin / previously frozen pin (first run records + freezes it)
 #   4. install the executable to $PI_TOOLS_DIR/bin/<name> and chmod +x
@@ -37,6 +38,12 @@ done
 
 command -v bun >/dev/null 2>&1 || { echo "install: bun is not on PATH — the pi-cyber toolchain requires Bun" >&2; exit 1; }
 command -v curl >/dev/null 2>&1 || { echo "install: curl is not on PATH" >&2; exit 1; }
+
+# SHA-256 of a file, portable across Linux (sha256sum) and macOS (shasum -a 256).
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}';
+  else shasum -a 256 "$1" | awk '{print $1}'; fi
+}
 
 FAILURES=0
 PLANNED=0
@@ -111,7 +118,7 @@ while IFS=$'\t' read -r name repo artifact versionFlag manifest_sha; do
 
   # 3. Verify SHA-256 of the downloaded ARCHIVE: manifest pin first, then previously frozen pin;
   #    a first-ever pin is frozen now (trust-on-first-use, plan §Task-3 step 1).
-  file_sha="$(shasum -a 256 "$DL" | awk '{print $1}')"
+  file_sha="$(sha256_of "$DL")"
   file_sha="$(echo "$file_sha" | tr 'A-Z' 'a-z')"
   prev_sha="$(bun "$TOOLCTL" resolved-get --file "$RESOLVED_FILE" "$name" 2>/dev/null)"
   expected="${manifest_sha:-$prev_sha}"
@@ -182,7 +189,7 @@ while IFS=$'\t' read -r name repo artifact versionFlag manifest_sha; do
   fi
   chmod +x "$BIN_DIR/$name" || { fail "$name" "chmod +x failed on $BIN_DIR/$name"; cleanup; continue; }
 
-  installed_sha="$(shasum -a 256 "$BIN_DIR/$name" | awk '{print $1}')"
+  installed_sha="$(sha256_of "$BIN_DIR/$name")"
   installed_sha="$(echo "$installed_sha" | tr 'A-Z' 'a-z')"
   # Digest semantics: file_sha is the ARCHIVE digest (already verified against the pin above);
   # installed_sha is the EXTRACTED EXECUTABLE's digest — a different file by construction, so the

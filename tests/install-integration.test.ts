@@ -3,7 +3,7 @@ import { chmod, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { loadManifest } from "../src/tools/manifest.ts";
-import { freezeResolved, loadResolved, pickDarwinArm64Asset, resolveLatest, type ResolvedRecord } from "../src/tools/installer.ts";
+import { freezeResolved, loadResolved, pickDarwinArm64Asset, pickHostAsset, resolveLatest, type ResolvedRecord } from "../src/tools/installer.ts";
 import { spawn } from "node:child_process";
 
 /** Spawn bash (cwd = repo root), capture exit code + stdout/stderr. Args are an argv array â€” no shell-string surface of our own. */
@@ -37,6 +37,28 @@ test("pickDarwinArm64Asset matches only darwin/arm64 install assets (pure unit â
   expect(pickDarwinArm64Asset(assets)?.url).toBe("https://x/4");
   expect(pickDarwinArm64Asset(assets.slice(4))?.url).toBe("https://x/7"); // dmg excluded, bare binary accepted
   expect(pickDarwinArm64Asset([{ name: "tool_darwin_amd64.zip", url: "https://x/9" }])).toBeNull();
+});
+
+test("pickHostAsset selects the linux/x64 asset and rejects foreign OS/arch (pure unit)", () => {
+  const assets = [
+    { name: "subfinder_2.8.0_linux_amd64.zip", url: "https://x/1" },
+    { name: "subfinder_2.8.0_linux_arm64.zip", url: "https://x/2" },
+    { name: "subfinder_2.8.0_macOS_arm64.zip", url: "https://x/3" },
+    { name: "subfinder_2.8.0_windows_amd64.zip", url: "https://x/4" },
+  ];
+  // linux/x64 -> the linux_amd64 archive, not linux_arm64 and not the mac/windows builds.
+  expect(pickHostAsset(assets, "linux", "x64")?.url).toBe("https://x/1");
+  // trivy-style capitalisation ("Linux-64bit") and a bare linux binary both match.
+  expect(pickHostAsset([{ name: "trivy_0.76.0_Linux-64bit.tar.gz", url: "https://x/5" }], "linux", "x64")?.url).toBe("https://x/5");
+  expect(pickHostAsset([{ name: "osv-scanner_linux_amd64", url: "https://x/6" }], "linux", "x64")?.url).toBe("https://x/6");
+  // gitleaks-style "linux_x64" and Go-style "linux_386" tokens (underscore-delimited, where \b fails).
+  expect(pickHostAsset([{ name: "gitleaks_8.30.1_linux_x64.tar.gz", url: "https://x/g" }], "linux", "x64")?.url).toBe("https://x/g");
+  expect(pickHostAsset([{ name: "tool_linux_386.tar.gz", url: "https://x/386" }], "linux", "x64")).toBeNull(); // 386 is foreign to x64
+  expect(pickHostAsset([{ name: "tool_linux_386.tar.gz", url: "https://x/386" }], "linux", "ia32")?.url).toBe("https://x/386");
+  // An arm64-only release yields nothing for a linux/x64 host (explicit null, never a wrong-arch pick).
+  expect(pickHostAsset([{ name: "tool_linux_arm64.tar.gz", url: "https://x/7" }], "linux", "x64")).toBeNull();
+  // linux/arm64 picks the aarch64/arm64 build and rejects amd64.
+  expect(pickHostAsset(assets, "linux", "arm64")?.url).toBe("https://x/2");
 });
 
 test(
@@ -172,7 +194,14 @@ test.skipIf(!NET)(
 );
 
 test("resolveLatest retries HTTP 403 with backoff and succeeds on a later attempt (injectable fetch, no network)", async () => {
-  const release = { tag_name: "v9.8.7", assets: [{ name: "tool_9.8.7_darwin_arm64.zip", browser_download_url: "https://example.invalid/t.zip" }] };
+  // Cross-platform asset set so the host-driven matcher resolves on any CI OS/arch.
+  const release = { tag_name: "v9.8.7", assets: [
+    { name: "tool_9.8.7_darwin_arm64.zip", browser_download_url: "https://example.invalid/t-darwin-arm64.zip" },
+    { name: "tool_9.8.7_darwin_amd64.zip", browser_download_url: "https://example.invalid/t-darwin-x64.zip" },
+    { name: "tool_9.8.7_linux_amd64.zip", browser_download_url: "https://example.invalid/t-linux-x64.zip" },
+    { name: "tool_9.8.7_linux_arm64.zip", browser_download_url: "https://example.invalid/t-linux-arm64.zip" },
+    { name: "tool_9.8.7_windows_amd64.zip", browser_download_url: "https://example.invalid/t-win-x64.zip" },
+  ] };
   const statuses = [403, 403, 200];
   const seenUrls: string[] = [];
   const delays: number[] = [];
@@ -204,7 +233,13 @@ test("resolveLatest treats 404 as permanent (single attempt, distinct message)",
 });
 
 test("resolveLatest sends the GitHub token as Bearer and never leaks it in errors", async () => {
-  const release = { tag_name: "v1.0.0", assets: [{ name: "x_darwin_arm64.zip", browser_download_url: "https://example.invalid/x.zip" }] };
+  const release = { tag_name: "v1.0.0", assets: [
+    { name: "x_darwin_arm64.zip", browser_download_url: "https://example.invalid/x-darwin-arm64.zip" },
+    { name: "x_darwin_amd64.zip", browser_download_url: "https://example.invalid/x-darwin-x64.zip" },
+    { name: "x_linux_amd64.zip", browser_download_url: "https://example.invalid/x-linux-x64.zip" },
+    { name: "x_linux_arm64.zip", browser_download_url: "https://example.invalid/x-linux-arm64.zip" },
+    { name: "x_windows_amd64.zip", browser_download_url: "https://example.invalid/x-win-x64.zip" },
+  ] };
   const authHeaders: string[] = [];
   const fakeFetch = async (_url: string | URL, init?: RequestInit): Promise<Response> => {
     authHeaders.push(new Headers(init?.headers).get("authorization") ?? "");

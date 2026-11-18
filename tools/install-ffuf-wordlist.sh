@@ -11,8 +11,11 @@ SOURCE_COMMIT="10a38f6cbe8ed6b89d55348756eff7486cd0f0ea"
 SOURCE_URL="https://raw.githubusercontent.com/danielmiessler/SecLists/$SOURCE_COMMIT/Discovery/Web-Content/common.txt"
 EXPECTED_SHA256="47fb86ca6fb3f97e5491161581900d6d99851fb16764eacddf16aa85617c956a"
 
+if command -v sha256sum >/dev/null 2>&1; then sha256_of() { sha256sum "$1" | cut -d ' ' -f 1; }
+else sha256_of() { shasum -a 256 "$1" | cut -d ' ' -f 1; }; fi
+
 curl --fail --location --proto '=https' --tlsv1.2 "$SOURCE_URL" --output "$TEMP_FILE"
-ACTUAL_SHA256="$(shasum -a 256 "$TEMP_FILE" | cut -d ' ' -f 1)"
+ACTUAL_SHA256="$(sha256_of "$TEMP_FILE")"
 if [[ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]]; then
   echo "pi-cyber: ffuf wordlist SHA-256 mismatch; refusing installation" >&2
   exit 1

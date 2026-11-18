@@ -13,7 +13,9 @@ const STACK = [
 	new URL("./node_modules/pi-subagents/index.js", ROOT).href,
 	new URL("./node_modules/pi-web-access/dist/index.js", ROOT).href,
 	new URL("./node_modules/pi-btw/extensions/btw.ts", ROOT).href,
-	pathToFileURL("/Users/marban/.pi/agent/npm/node_modules/opencode-pi/src/index.ts").href,
+	// Optional OpenCode factory: operator-specific, loaded only when CYBER_OPENCODE_ENTRY
+	// points at an installed opencode-pi entry. Absent by default, so nothing loads.
+	...(process.env.CYBER_OPENCODE_ENTRY?.trim() ? [pathToFileURL(process.env.CYBER_OPENCODE_ENTRY.trim()).href] : []),
 ];
 
 type FactoryModule = { default?: unknown; sessions?: Array<(ctx: ExtensionContext) => void> };

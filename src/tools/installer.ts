@@ -5,8 +5,9 @@
  * - The reviewed `tools/manifest.json` is NEVER mutated by the installer. The first verified
  *   download of a tool freezes `{name, repo, tag, assetUrl, sha256, resolvedAt}` into
  *   `tools/manifest.resolved.json` instead.
- * - Deterministic asset pick: only darwin/arm64 (this host is darwin/arm64 only; foreign
- *   platforms must never reach `validated`).
+ * - Deterministic asset pick: driven by the host `process.platform`/`process.arch` (darwin,
+ *   linux or win32; arm64, x64 or ia32). A release with no asset for the host platform fails
+ *   explicitly rather than reaching `validated`.
  * - Everything here is pure fn/fetch/fs — no shell strings (src/ constraint), so the freeze
  *   path is directly unit-testable with fixture data.
  */
@@ -42,31 +43,74 @@ export interface ResolvedRecord {
   binary_sha256?: string;
 }
 
-/** Human-readable matching rule printed by install.sh --dry-run and referenced in failures. */
-export const ASSET_PATTERN =
-  'asset name matches (darwin|macos|osx) AND (arm64|aarch64); extension ∈ zip|tar.gz|tgz|tar.xz|tar.bz2|bare binary; excludes x86_64|x86|amd64|386|64bit|32bit, checksums/sbom/meta files, dmg|pkg|jar|sh|py';
+/** Host OS name tokens an asset filename may use, by `process.platform`. */
+function hostOsRe(platform: NodeJS.Platform = process.platform): RegExp {
+  switch (platform) {
+    case "darwin": return /(darwin|macos|osx|apple)/i;
+    case "linux": return /linux/i;
+    case "win32": return /(windows|win64|win32)/i;
+    default: return new RegExp(String(platform), "i");
+  }
+}
+
+interface ArchRe { cpu: RegExp; foreign: RegExp; label: string }
+/**
+ * Build a token regex whose boundaries treat `_`, `-`, `.` and string edges as separators.
+ * `\b` cannot be used here: in `linux_x64` the `_x` pair is two word chars, so `\bx64\b` never
+ * matches — exactly the gitleaks (`linux_x64`) and Go (`linux_386`) asset-naming conventions.
+ */
+const tok = (...alts: string[]): RegExp => new RegExp(`(?:^|[^a-z0-9])(?:${alts.join("|")})(?:[^a-z0-9]|$)`, "i");
+/** Host CPU tokens an asset may use, plus the foreign-arch tokens to reject, by `process.arch`. */
+function hostArchRe(arch: string = process.arch): ArchRe {
+  switch (arch) {
+    case "arm64": return { cpu: tok("arm64", "aarch64"), foreign: tok("x86[_-]?64", "amd64", "x64", "i386", "386", "32bit", "armv[0-7]"), label: "arm64|aarch64" };
+    case "x64": return { cpu: tok("x86[_-]?64", "amd64", "x64", "64bit"), foreign: tok("arm64", "aarch64", "armv[0-7]", "i386", "386", "32bit"), label: "x86_64|amd64|x64" };
+    case "ia32": return { cpu: tok("i386", "386", "x86", "32bit"), foreign: tok("x86[_-]?64", "amd64", "x64", "arm64", "aarch64", "64bit"), label: "i386|386|x86" };
+    default: return { cpu: new RegExp(String(arch), "i"), foreign: /(?!)/, label: String(arch) };
+  }
+}
+
+/** Metadata siblings and non-installable artifact types that would otherwise false-match. */
+const NON_BINARY_RE = /(sbom|checksum|sha256|sha1|\.dmg|\.pkg|\.jar|\.py|\.sh|\.txt|\.json|\.md|\.sig|\.crt|\.release|\.yaml|\.yml)$/i;
+const ARCHIVE_RE = /\.(zip|tar\.gz|tgz|tar\.xz|txz|tar\.bz2|tbz2)$/i;
 
 const REPO_RE = /^[A-Za-z0-9_][A-Za-z0-9_.-]*\/[A-Za-z0-9_.-]+$/;
 const SHA256_RE = /^[0-9a-f]{64}$/i;
 
-/** Not installable targets and pure metadata siblings that would otherwise false-match. */
-const EXCLUDE_RE = /(x86_64|x86|amd64|i386|386|64bit|32bit|sbom|checksum|sha256|sha1|\.dmg|\.pkg|\.jar|\.py|\.sh|\.txt|\.json|\.md|\.sig|\.crt|\.release|\.yaml|\.yml)$/i;
-const OS_RE = /(darwin|macos|osx)/i;
-const ARM_RE = /(arm64|aarch64)/i;
-const ARCHIVE_RE = /\.(zip|tar\.gz|tgz|tar\.xz|txz|tar\.bz2|tbz2)$/i;
+/** Human-readable matching rule for `platform`/`arch`; printed by install.sh --dry-run and in failures. */
+export function assetPattern(platform: NodeJS.Platform = process.platform, arch: string = process.arch): string {
+  const os = platform === "darwin" ? "darwin|macos|osx" : platform === "win32" ? "windows|win64|win32" : String(platform);
+  return `asset name matches (${os}) AND (${hostArchRe(arch).label}); extension ∈ zip|tar.gz|tgz|tar.xz|tar.bz2|bare binary; excludes foreign-arch, checksums/sbom/meta files, dmg|pkg|jar|sh|py`;
+}
+
+/** Host-default matching-rule string, for callers that want a constant. */
+export const ASSET_PATTERN = assetPattern();
 
 /**
- * Pick the darwin/arm64 install asset from a release asset list. Returns null when nothing
- * matches — the caller must surface that as an explicit per-tool failure, never a silent skip.
+ * Pick the install asset for `platform`/`arch` (defaulting to this host) from a release asset
+ * list. Returns null when nothing matches — the caller surfaces that as an explicit per-tool
+ * failure, never a silent skip.
  */
-export function pickDarwinArm64Asset(assets: ReleaseAsset[]): ReleaseAsset | null {
+export function pickHostAsset(
+  assets: ReleaseAsset[],
+  platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch,
+): ReleaseAsset | null {
+  const os = hostOsRe(platform);
+  const { cpu, foreign } = hostArchRe(arch);
   const candidates = assets
     .filter((asset) => typeof asset.name === "string" && asset.name.length > 0 && typeof asset.url === "string")
-    .filter((asset) => OS_RE.test(asset.name))
-    .filter((asset) => ARM_RE.test(asset.name))
-    .filter((asset) => !EXCLUDE_RE.test(asset.name))
+    .filter((asset) => os.test(asset.name))
+    .filter((asset) => cpu.test(asset.name))
+    .filter((asset) => !foreign.test(asset.name))
+    .filter((asset) => !NON_BINARY_RE.test(asset.name))
     .filter((asset) => ARCHIVE_RE.test(asset.name) || !/\.[a-z0-9]+$/i.test(asset.name)); // archive or bare binary
   return candidates[0] ?? null;
+}
+
+/** darwin/arm64-specific alias — pins the matcher's mac behaviour for the unit test and mac callers. */
+export function pickDarwinArm64Asset(assets: ReleaseAsset[]): ReleaseAsset | null {
+  return pickHostAsset(assets, "darwin", "arm64");
 }
 
 /** Resolve the latest GitHub release of `repo` down to one installable darwin/arm64 artifact.
@@ -149,9 +193,9 @@ async function parseReleaseResponse(repo: string, body: unknown): Promise<Resolu
     }
     return { name: asset.name, url: asset.browser_download_url };
   });
-  const picked = pickDarwinArm64Asset(assets);
+  const picked = pickHostAsset(assets);
   if (picked === null) {
-    throw new Error(`no darwin/arm64 asset on tag ${tag} (matcher: ${ASSET_PATTERN})`);
+    throw new Error(`no ${process.platform}/${process.arch} asset on tag ${tag} (matcher: ${assetPattern()})`);
   }
   return { tag, assetName: picked.name, assetUrl: picked.url };
 }
