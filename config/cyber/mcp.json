@@ -2,51 +2,37 @@
   "mcpServers": {
     "memory": {
       "command": "bunx",
-      "args": ["@modelcontextprotocol/server-memory"],
+      "args": ["@modelcontextprotocol/server-memory@2.2.1"],
       "description": "Persistent knowledge-graph memory across sessions: entities, relations, observations for long engagements."
-    },
-    "filesystem": {
-      "command": "bunx",
-      "args": ["@modelcontextprotocol/server-filesystem", "/home/bob"],
-      "description": "Structured file access across the home directory for engagement workspaces and loot."
     },
     "fetch": {
       "command": "uvx",
-      "args": ["mcp-server-fetch"],
+      "args": ["mcp-server-fetch==2026.11.18"],
       "description": "Fetch and extract web page content as markdown for OSINT and documentation pulls."
     },
     "git": {
       "command": "uvx",
-      "args": ["mcp-server-git"],
+      "args": ["mcp-server-git==2026.11.18"],
       "description": "Read and inspect git repositories, including exposed .git sources during recon."
     },
     "duckduckgo": {
       "command": "uvx",
-      "args": ["duckduckgo-mcp-server"],
+      "args": ["duckduckgo-mcp-server==0.7.0"],
       "description": "Web and news search for OSINT, dork pivoting, and technology research."
     },
     "playwright": {
       "command": "bunx",
-      "args": ["@playwright/mcp@latest", "--headless"],
+      "args": ["@playwright/mcp@0.0.86", "--headless"],
       "description": "Headless browser automation: authenticated flows, client-side rendering, XSS confirmation."
-    },
-    "github": {
-      "command": "bunx",
-      "args": ["@modelcontextprotocol/server-github"],
-      "enabled": true,
-      "env": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "!gh auth token"
-      },
-      "description": "GitHub search and access for exposed source repositories and leak hunting."
     },
     "time": {
       "command": "bunx",
-      "args": ["time-mcp"],
+      "args": ["time-mcp@1.0.6"],
       "description": "Timezone-accurate timestamps for continuous.md logging and evidence records."
     },
     "sequential-thinking": {
       "command": "bunx",
-      "args": ["@modelcontextprotocol/server-sequential-thinking"],
+      "args": ["@modelcontextprotocol/server-sequential-thinking@2.2.0"],
       "description": "Structured multi-step reasoning space for chain construction and complex plan revisions."
     }
   }
