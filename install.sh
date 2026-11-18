@@ -173,34 +173,15 @@ print(settings_path)
 PY
 say "wrote $AGENT/settings.json"
 
-# ── provider key ─────────────────────────────────────────────────────────────
-step "provider key"
-KEY_PATH="${CYBER_PROXY_KEY_PATH:-$HOME/.config/opencode/aimylove.key}"
-KEY_DIR="$(dirname "$KEY_PATH")"
-KEY_HINT="mkdir -p \"$KEY_DIR\" && printf '%s' '<key>' > \"$KEY_PATH\" && chmod 600 \"$KEY_PATH\""
-if [[ -f "$KEY_PATH" ]]; then
-  say "present at $KEY_PATH"
-elif [[ -n "${CYBER_PROXY_KEY:-}" ]]; then
-  mkdir -p "$KEY_DIR"
-  printf '%s' "$CYBER_PROXY_KEY" > "$KEY_PATH"
-  chmod 600 "$KEY_PATH"
-  say "written to $KEY_PATH (mode 600)"
-elif [[ -t 0 ]]; then
-  read -r -s -p "  paste the proxy key (blank to skip): " KEY
-  echo
-  if [[ -n "$KEY" ]]; then
-    mkdir -p "$KEY_DIR"
-    printf '%s' "$KEY" > "$KEY_PATH"
-    chmod 600 "$KEY_PATH"
-    say "written to $KEY_PATH (mode 600)"
-  else
-    say "skipped — write it yourself before the first request:"
-    say "  $KEY_HINT"
-  fi
-else
-  say "no key found at $KEY_PATH"
-  say "  $KEY_HINT"
-fi
+# ── provider configuration ───────────────────────────────────────────────────
+# Bring-your-own: the harness ships no model provider and no bundled key, and
+# the installer never prompts for or writes a provider credential. Configure a
+# provider yourself in the profile you launch.
+step "provider configuration"
+say "configure a model provider in models.json for the profile you launch:"
+say "  plain pi:    $AGENT/models.json"
+say "  bun run pi:  $ROOT/config/cyber/models.json"
+say "credentials are yours and live outside this repo — see the README \"Model provider\" section"
 
 # ── search key ───────────────────────────────────────────────────────────────
 # Only when the effective web-search config selects the You.com provider: the

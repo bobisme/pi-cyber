@@ -35,9 +35,9 @@ tools.
    (read-only) or `bun scripts/install-packages.ts` (also refreshes the copied
    skills).
 2. **Configure a provider in this profile.** Pi keeps login credentials in
-   `auth.json` and custom provider definitions in `models.json`. For the current
-   proxy use provider ID `marban`, base URL `https://ai.marban.lol/v1`, and API
-   `openai-completions`; see the [model provider example](../../README.md#model-provider).
+   `auth.json` and custom provider definitions in `models.json`. Bring your own
+   provider: define any OpenAI-compatible (or other Pi-supported) endpoint with
+   your own key source — see the [model provider example](../../README.md#model-provider).
    The parent `config/models.json` is an optional installer input, not this
    profile's model catalogue. The personal profile's providers are not copied
    automatically.

@@ -56,8 +56,6 @@ so no launcher, environment variable or working directory is required.
 | `SKIP_GLOBAL_PI=1` | Do not install the `pi` CLI. |
 | `PI_VERSION=…` | Override the global Pi CLI version; the default is 1.3.0. |
 | `PI_CODING_AGENT_DIR=…` | Choose the agent profile configured by the installer. |
-| `CYBER_PROXY_KEY=…` | Create a missing provider key file without prompting. |
-| `CYBER_PROXY_KEY_PATH=…` | Choose the key-file location; defaults to `~/.config/opencode/aimylove.key`. |
 | `PI_TOOLS_DIR=…` | Install the toolchain elsewhere. |
 
 `./install.sh --check` skips dependency and scanner installation, but still
@@ -74,50 +72,38 @@ To refresh the six selected workflow skills from the pinned `bigpowers` package,
 
 ### Model provider
 
-The current proxy endpoint is `https://ai.marban.lol/v1`, with provider ID
-`marban` and API type `openai-completions`. Configure it in the profile you
-actually launch: `~/.pi/agent/models.json` for plain `pi`, or
-`config/cyber/models.json` for `bun run pi`. The two profiles do not share
-provider configuration automatically.
+Bring your own. The harness ships no provider and no bundled key — configure a
+model provider yourself in the profile you actually launch:
+`~/.pi/agent/models.json` for plain `pi`, or `config/cyber/models.json` for
+`bun run pi`. The two profiles do not share provider configuration
+automatically.
 
-A minimal model catalogue is:
+A minimal catalogue for any OpenAI-compatible endpoint:
 
 ```json
 {
   "providers": {
-    "marban": {
-      "name": "marban.lol",
-      "baseUrl": "https://ai.marban.lol/v1",
+    "my-provider": {
+      "name": "my-provider",
+      "baseUrl": "https://<your-endpoint>/v1",
       "api": "openai-completions",
-      "apiKey": "!cat ~/.config/opencode/aimylove.key",
-      "models": [{ "id": "claude-sonnet-4-6" }]
+      "apiKey": "!cat ~/.config/pi-cyber/provider.key",
+      "models": [{ "id": "<model-id>" }]
     }
   }
 }
 ```
 
-The legacy key filename is compatible with the renamed provider; it is a local
-credential source, not the provider ID. Point `apiKey` at your own configured
-key source, add the model definitions you need, then restart Pi and select
-`marban/claude-sonnet-4-6`. Existing sessions may still reference the old
-`aimylove` ID and need the model selected again.
-
-For a small inference check, with `MARBAN_API_KEY` set in your shell:
-
-```sh
-curl https://ai.marban.lol/v1/chat/completions \
-  -H "Authorization: Bearer $MARBAN_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"Reply with OK"}],"max_tokens":32}'
-```
+Point `apiKey` at your own key source — a local file read by a command as
+above, an environment variable, or whatever your provider uses — add the
+models you need, then restart Pi and select the provider/model. Credentials
+are yours; they live outside this repository and are never bundled with it.
 
 A model appearing in `/v1/models` does not establish inference access. Model
-routes can differ in credentials, credits, tool support, and streaming behavior.
-A rejected tool schema is a request-compatibility problem; a 502
-`upstream_connection_error` indicates a gateway/upstream failure and requires
-server logs to identify its precise cause. Tool schemas use an object at the
-root; action-specific checks run before execution so providers that reject
-top-level schema unions can accept the tools.
+routes can differ in credentials, credits, tool support, and streaming
+behavior. Tool schemas use an object at the root; action-specific checks run
+before execution so providers that reject top-level schema unions can accept
+the tools.
 
 ## Commands
 
