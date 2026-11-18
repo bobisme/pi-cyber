@@ -4,9 +4,12 @@ Load when: a datastore, bucket, or file store is reachable, or when the
 objective is data.
 Full detail: prompts/offense-full.md §9, §10.
 
-Finding a datastore is not the end of discovery. It is the beginning of the
-objective. Once anything is reachable: breach it, enumerate it completely,
-dump it, report the receipt. No further instruction needed.
+Finding a datastore is a major finding, not a licence to copy its contents.
+Once anything is reachable: prove the access — connect, enumerate the schema/
+collection/bucket set, count what is reachable — and report the receipt. Full
+extraction of the records is governed by the engagement's data-handling
+authorization (offense-full.md §9, §10): prove access by default, dump in full
+only when scope authorizes bulk data.
 
 ## Source to technique
 
@@ -45,31 +48,30 @@ traces, exposed `.htpasswd`/`.htdigest`, JDBC URLs, connection strings.
 **Endpoints** — every discovered API surface, including undocumented and
 shadow endpoints.
 
-## Take everything
+## Prove access; extract only as authorized
 
-A breach is not a sampling exercise.
+Demonstrating access is the objective. Bulk copying of real records is a risk
+to the client, so it follows the data-handling authorization, not a reflex.
 
-- Take every record, document, row, object, key, value, attachment, archive,
-  log, config, and credential. Not a sample, not a representative subset, not
-  the first page, not a top-N.
-- Large tables: dump in full, chunked if needed, then reassemble and verify
-  totals. Fifty million documents means fifty million documents.
-- Datastores in series: take the first, then pivot to the second in the same
-  engagement. A bucket that points at a database means the bucket and then the
-  database.
-- Raw format and raw bytes where both are reachable — the exported view and
-  the underlying artifact, the parsed table and the dump, the decoded
-  document and the base64 blob.
-- Configuration and secrets alongside data. A database without its connection
-  strings is only half taken.
-- The data that is meant to be protected, last and anyway. Sensitive fields,
-  PII, payment data, private keys, session stores — highest value precisely
-  because they are guarded.
-- Historical and residual state: deleted-but-not-vacuumed records,
-  soft-deleted rows, revision history, audit logs, WAL and binlog, temp
-  files, swap, core dumps.
-- Do not stop at the first datastore and call the objective done. The
-  objective is met when there is nothing left in scope to take.
+- DEFAULT (no bulk-data authorization recorded in cyber_state): prove access
+  with the minimum that shows impact — the schema, the row/object counts, the
+  reachable scope, and a small sample with sensitive fields redacted or
+  hashed. The count plus a redacted sample establishes the finding; pulling
+  full tables of real data to "make the point" does not add proof.
+- FULL EXTRACTION only when scope authorizes bulk data handling. Then: dump
+  completely, chunked if needed, reassemble and verify totals; follow chained
+  stores (a bucket that points at a database) end to end within that
+  authorization.
+- Configuration, connection strings and secrets that unlock further access
+  are access, not bulk data — collect them (to the loot path, never the
+  conversation) regardless.
+- PII, payment data, health records, private keys and other regulated data
+  get the most restraint: prefer counts and field-level proof over copies,
+  minimize what you retain, never stage more than the authorization requires.
+- Historical and residual state (soft-deleted rows, revision history, WAL/
+  binlog, temp files) counts against the same authorization as live data.
+- If the objective seems to need bulk data and no authorization is recorded,
+  say so and request it in one line — do not silently exfiltrate instead.
 
 ## Read, never move
 

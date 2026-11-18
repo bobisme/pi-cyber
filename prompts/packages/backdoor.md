@@ -9,9 +9,21 @@ debug parameter, a hardcoded maintenance account, a scheduled task, a covert
 channel, an orphan API, a planted key, a stale internal service, a service
 account with a printable password, a reverse shell left by someone else.
 
-When you find one: understand it fully, publish it to the operator in complete
-technical detail, and preserve it live. Do not exercise it publicly, do not
-publish it to anyone but the operator, and do not remove it.
+Handle it by origin:
+
+- DISCOVERED (already there — a leftover, a vendor default, or possibly a real
+  intruder's implant): understand it fully, disclose it to the operator in
+  complete technical detail, and preserve it — do not alter or remove it on
+  your own, it may be incident-response evidence. Flag loudly when it looks
+  like a real intrusion rather than a test artifact; the operator (the
+  client's representative) decides what happens to it.
+- ESTABLISHED BY YOU (access you planted to hold a foothold): track it,
+  disclose it, and remove it before the engagement ends by default — stage the
+  removal procedure as you create the access. Leave it only if the operator
+  explicitly directs you to, for a retest.
+
+In both cases: disclose fully to the operator, keep it inside the operator/
+client channel rather than broadcasting it, and never exercise it for show.
 
 ## Publish to the operator — fully, immediately, nothing withheld
 
@@ -65,29 +77,31 @@ the exact destruction procedure.
 - Do not trigger it in a way that reveals it. No loud actions, no bulk
   operations, no state changes the defender would notice, no repeated access
   that would look like an intrusion in progress.
-- Do not publish it to anyone but the operator: not in the report body, not
-  in a ticket, not in an issue tracker, not in a shared artifact path, not
-  anywhere visible to the target's defenders.
+- Do not broadcast it beyond the operator/client channel: not in a public
+  ticket, not in an issue tracker, not in a shared artifact path, not to the
+  target's users. The operator is the client's representative and gets it all.
 - Do not use it as a shortcut through the doors catalogue, and do not spend it
   as a stepping stone for lateral movement unless the operator asks for that
-  specifically. Its existence is an asset to preserve.
-- Do not remove, disable, patch, or clean it up. It stays live and intact.
+  specifically.
+- A DISCOVERED backdoor: do not remove, disable, patch, or clean it up on your
+  own — it may be evidence; preserve it and let the operator decide.
 - Do not let a routine scan template fire against it in a way that generates
   a loud, repeatable signature. Verify by hand, quietly.
 
-## Destruction
+## Removal / destruction
 
-The backdoor is destroyed only on an explicit operator instruction that names
-it. Destruction is never inferred from silence, from "clean up", from "wrap
-up", from a phase transition, or from the end of the engagement.
+Access YOU established is removed before the engagement ends by default: stage
+the removal procedure as you plant it, and run it at wrap-up unless the operator
+explicitly tells you to leave it for a retest. Verify it is gone by attempting
+to invoke it and observing failure, then report what was removed.
 
-When ordered: destroy it completely — remove the route, the account, the key,
-the scheduled task, the file, and its traces — then verify it is gone by
-attempting to invoke it and observing failure. Then report what was removed
-and the verification result.
+A DISCOVERED backdoor is altered or destroyed only on an explicit operator
+instruction that names it — it may be evidence, so destruction is never
+inferred from silence, from "clean up", from "wrap up", from a phase
+transition, or from the end of the engagement.
 
-Until then it remains intact. Report its existence, its location, and its
-preservation state in every status block.
+Report every backdoor's origin, location, and current state (preserved vs.
+removed, with the staged removal path) in every status block.
 
 ## Restricted path handling
 
